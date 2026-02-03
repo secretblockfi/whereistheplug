@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<meta name="description" content="WhereIsThePlug? — Find public charging outlets near you. Crowdsourced, community-driven." />
+<meta name="theme-color" content="#0f172a" />
+<title>WhereIsThePlug?</title>
+
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" data-href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f172a'/><path d='M10 14h4v-2h4v2h4v2h-4v2h-4v-2h-4v-2z' fill='%2338bdf8'/><circle cx='22' cy='22' r='4' fill='none' stroke='%2338bdf8' stroke-width='2'/><path d='M22 20v2l2 1' fill='none' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/></svg>" />
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<!-- Google Fonts — Sora (display) + DM Sans (body) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+
+<style>
+/* ══════════════════════════════════════════════════════════════════
+   DESIGN SYSTEM — Dark utilitarian with electric cyan accents.
+   Tone: industrial-clean, high-contrast, purposeful.
+   ══════════════════════════════════════════════════════════════════ */
+:root {
+  --clr-bg:        #0a0e1a;
+  --clr-surface:   #111827;
+  --clr-surface2:  #1a2233;
+  --clr-border:    #2a3548;
+  --clr-text:      #e2e8f0;
+  --clr-text-dim:  #64748b;
+  --clr-accent:    #38bdf8;
+  --clr-accent-dim:#0ea5e9;
+  --clr-accent-glow: rgba(56,189,248,0.25);
+  --clr-success:   #34d399;
+  --clr-warning:   #fbbf24;
+  --clr-danger:    #f87171;
+  --clr-quiet:     #34d399;
+  --clr-moderate:  #fbbf24;
+  --clr-loud:      #f87171;
+  --radius:        10px;
+  --radius-sm:     6px;
+  --font-display: 'Sora', sans-serif;
+  --font-body:    'DM Sans', sans-serif;
+  --transition:   200ms cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--clr-bg);
+  color: var(--clr-text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;  /* app is full viewport */
+}
+
+/* ── Layout Shell ──────────────────────────────────────────────── */
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── Top Navbar ────────────────────────────────────────────────── */
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 56px;
+  background: var(--clr-surface);
+  border-bottom: 1px solid var(--clr-border);
+  flex-shrink: 0;
+  z-index: 100;
+}
+.navbar__logo {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--clr-accent);
+  letter-spacing: -0.5px;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.navbar__logo svg { width: 28px; height: 28px; }
+.navbar__nav { display: flex; align-items: center; gap: 4px; }
+.navbar__btn {
+  background: none;
+  border: none;
+  color: var(--clr-text-dim);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.navbar__btn:hover { color: var(--clr-text); background: var(--clr-surface2); }
+.navbar__btn--accent {
+  background: var(--clr-accent);
+  color: #0a0e1a;
+  font-weight: 600;
+}
+.navbar__btn--accent:hover { background: var(--clr-accent-dim); color: #0a0e1a; }
+.navbar__locale { font-size: 12px; border: 1px solid var(--clr-border); padding: 5px 8px; border-radius: var(--radius-sm); background: var(--clr-surface2); color: var(--clr-text); cursor: pointer; }
+
+/* ── Main Content ──────────────────────────────────────────────── */
+#main { flex: 1; position: relative; overflow: hidden; }
+
+/* ── Pages (view system) ───────────────────────────────────────── */
+.page { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity 250ms ease; }
+.page--active { opacity: 1; pointer-events: auto; }
+
+/* ══════════════════════════════════════════════════════════════════
+   MAP PAGE
+   ══════════════════════════════════════════════════════════════════ */
+#page-map { display: flex; }
+#map { flex: 1; height: 100%; z-index: 1; }
+
+/* Leaflet overrides */
+.leaflet-control-zoom { border: none !important; }
+.leaflet-control-zoom a {
+  background: var(--clr-surface) !important;
+  color: var(--clr-text) !important;
+  border-color: var(--clr-border) !important;
+  transition: background var(--transition);
+}
+.leaflet-control-zoom a:hover { background: var(--clr-surface2) !important; }
+.leaflet-control-attribution { background: rgba(10,14,26,0.7) !important; color: var(--clr-text-dim) !important; font-size: 10px !important; }
+
+/* Map controls overlay */
+.map-controls {
+  position: absolute; top: 12px; left: 12px; z-index: 10;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.map-btn {
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  color: var(--clr-text);
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transition: all var(--transition);
+  backdrop-filter: blur(4px);
+}
+.map-btn:hover { background: var(--clr-surface2); border-color: var(--clr-accent); }
+.map-btn__icon { font-size: 16px; }
+
+/* Plug markers */
+.plug-marker {
+  background: var(--clr-surface);
+  border: 2px solid var(--clr-accent);
+  border-radius: 50% 50% 50% 4px;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 3px var(--clr-accent-glow);
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.plug-marker:hover { transform: scale(1.15); box-shadow: 0 3px 12px rgba(0,0,0,0.5), 0 0 0 4px var(--clr-accent-glow); }
+.plug-marker--verified { border-color: var(--clr-success); box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 3px rgba(52,211,153,0.25); }
+
+/* Popup */
+.leaflet-popup-content-wrapper {
+  background: var(--clr-surface) !important;
+  border: 1px solid var(--clr-border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+  color: var(--clr-text) !important;
+}
+.leaflet-popup-tip { background: var(--clr-surface) !important; }
+.leaflet-popup-content { padding: 16px !important; margin: 0 !important; min-width: 220px; }
+.leaflet-popup-close-button { color: var(--clr-text-dim) !important; top: 4px !important; right: 6px !important; font-size: 18px !important; }
+.leaflet-popup-close-button:hover { color: var(--clr-text) !important; }
+
+.popup__name { font-family: var(--font-display); font-weight: 700; font-size: 15px; margin-bottom: 8px; color: var(--clr-accent); }
+.popup__badge { display: inline-flex; align-items: center; gap: 4px; background: var(--clr-surface2); border: 1px solid var(--clr-border); border-radius: 20px; padding: 3px 8px; font-size: 11.5px; color: var(--clr-text-dim); margin-bottom: 10px; }
+.popup__row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 13px; }
+.popup__label { color: var(--clr-text-dim); }
+.popup__value { font-weight: 500; }
+.popup__stars { color: var(--clr-warning); letter-spacing: 1px; }
+.popup__detail-btn {
+  display: block; width: 100%; margin-top: 12px; padding: 8px;
+  background: var(--clr-accent); color: #0a0e1a; border: none;
+  border-radius: var(--radius-sm); font-weight: 600; font-size: 13px;
+  cursor: pointer; transition: background var(--transition);
+}
+.popup__detail-btn:hover { background: var(--clr-accent-dim); }
+
+/* ══════════════════════════════════════════════════════════════════
+   SIDE PANEL (detail / add / auth / leaderboard / profile)
+   ══════════════════════════════════════════════════════════════════ */
+.panel {
+  position: absolute; top: 0; right: -380px; width: 360px; height: 100%;
+  background: var(--clr-surface); border-left: 1px solid var(--clr-border);
+  z-index: 50; transition: right 300ms cubic-bezier(.4,0,.2,1);
+  overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column;
+}
+.panel--open { right: 0; }
+.panel__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px; border-bottom: 1px solid var(--clr-border);
+  flex-shrink: 0; position: sticky; top: 0; background: var(--clr-surface); z-index: 2;
+}
+.panel__title { font-family: var(--font-display); font-weight: 700; font-size: 17px; }
+.panel__close { background: none; border: none; color: var(--clr-text-dim); font-size: 22px; cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: all var(--transition); }
+.panel__close:hover { color: var(--clr-text); background: var(--clr-surface2); }
+.panel__body { padding: 20px; flex: 1; }
+
+/* ══════════════════════════════════════════════════════════════════
+   SHARED FORM STYLES
+   ══════════════════════════════════════════════════════════════════ */
+.form__group { margin-bottom: 16px; }
+.form__label { display: block; font-size: 12.5px; font-weight: 600; color: var(--clr-text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.form__input {
+  width: 100%; padding: 10px 12px;
+  background: var(--clr-surface2); border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm); color: var(--clr-text); font-family: var(--font-body); font-size: 14px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  outline: none;
+}
+.form__input:focus { border-color: var(--clr-accent); box-shadow: 0 0 0 3px var(--clr-accent-glow); }
+.form__input::placeholder { color: var(--clr-text-dim); }
+select.form__input { appearance: none; -webkit-appearance: none; cursor: pointer; }
+textarea.form__input { resize: vertical; min-height: 80px; }
+
+.form__checkbox-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; }
+.form__checkbox {
+  width: 20px; height: 20px; border-radius: 5px;
+  border: 2px solid var(--clr-border); background: var(--clr-surface2);
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition); flex-shrink: 0;
+}
+.form__checkbox--checked { background: var(--clr-accent); border-color: var(--clr-accent); }
+.form__checkbox--checked::after { content: '✓'; color: #0a0e1a; font-weight: 700; font-size: 13px; }
+
+.form__btn {
+  width: 100%; padding: 12px;
+  background: var(--clr-accent); color: #0a0e1a;
+  border: none; border-radius: var(--radius);
+  font-family: var(--font-body); font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: all var(--transition);
+  margin-top: 8px;
+}
+.form__btn:hover { background: var(--clr-accent-dim); transform: translateY(-1px); }
+.form__btn:active { transform: translateY(0); }
+.form__btn--secondary { background: var(--clr-surface2); color: var(--clr-text); border: 1px solid var(--clr-border); }
+.form__btn--secondary:hover { border-color: var(--clr-accent); color: var(--clr-accent); }
+
+.form__link { color: var(--clr-accent); font-size: 13px; cursor: pointer; text-decoration: none; border: none; background: none; font-family: var(--font-body); }
+.form__link:hover { text-decoration: underline; }
+
+.form__error { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--clr-danger); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; margin-top: 8px; display: none; }
+.form__error--visible { display: block; }
+.form__success { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: var(--clr-success); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; margin-top: 8px; display: none; }
+.form__success--visible { display: block; }
+
+/* ── Outlet type chips ─────────────────────────────────────────── */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 5px 10px; border-radius: 20px;
+  border: 1px solid var(--clr-border); background: var(--clr-surface2);
+  color: var(--clr-text-dim); font-size: 12px; cursor: pointer;
+  transition: all var(--transition); user-select: none;
+}
+.chip--active { border-color: var(--clr-accent); background: var(--clr-accent-glow); color: var(--clr-accent); }
+
+/* ── Stars rating input ────────────────────────────────────────── */
+.star-input { display: flex; gap: 4px; }
+.star-input span {
+  font-size: 24px; cursor: pointer; color: var(--clr-border);
+  transition: color var(--transition); user-select: none;
+}
+.star-input span.active, .star-input span:hover, .star-input span:hover ~ span { color: var(--clr-warning); }
+
+/* ── Review card ───────────────────────────────────────────────── */
+.review-card {
+  background: var(--clr-surface2); border: 1px solid var(--clr-border);
+  border-radius: var(--radius); padding: 12px; margin-bottom: 10px;
+}
+.review-card__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.review-card__user { font-weight: 600; font-size: 13px; }
+.review-card__stars { color: var(--clr-warning); font-size: 13px; }
+.review-card__comment { font-size: 13px; color: var(--clr-text-dim); line-height: 1.5; }
+.review-card__date { font-size: 11px; color: var(--clr-text-dim); margin-top: 4px; }
+
+/* ── Detail section divider ────────────────────────────────────── */
+.detail-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid var(--clr-border);
+}
+.detail-row:last-of-type { border-bottom: none; }
+.detail-row__label { color: var(--clr-text-dim); font-size: 13px; }
+.detail-row__value { font-weight: 500; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+
+/* ── Noise badge ───────────────────────────────────────────────── */
+.noise-badge { padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+.noise-badge--quiet { background: rgba(52,211,153,0.15); color: var(--clr-quiet); }
+.noise-badge--moderate { background: rgba(251,191,36,0.15); color: var(--clr-moderate); }
+.noise-badge--loud { background: rgba(248,113,113,0.15); color: var(--clr-loud); }
+.noise-badge--unknown { background: var(--clr-surface2); color: var(--clr-text-dim); }
+
+/* ══════════════════════════════════════════════════════════════════
+   AUTH PAGES
+   ══════════════════════════════════════════════════════════════════ */
+.auth-page {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; background: var(--clr-bg);
+}
+.auth-card {
+  background: var(--clr-surface); border: 1px solid var(--clr-border);
+  border-radius: 16px; padding: 40px 32px; width: 100%; max-width: 400px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+}
+.auth-card__logo { text-align: center; margin-bottom: 28px; }
+.auth-card__logo svg { width: 48px; height: 48px; }
+.auth-card__title { font-family: var(--font-display); font-weight: 800; font-size: 22px; text-align: center; margin-bottom: 6px; }
+.auth-card__sub { color: var(--clr-text-dim); font-size: 14px; text-align: center; margin-bottom: 28px; }
+
+/* ══════════════════════════════════════════════════════════════════
+   FULL-PAGE VIEWS (leaderboard, profile)
+   ══════════════════════════════════════════════════════════════════ */
+.fullpage {
+  padding: 32px 24px; max-width: 720px; margin: 0 auto;
+  overflow-y: auto; height: 100%;
+}
+.fullpage__title { font-family: var(--font-display); font-weight: 800; font-size: 24px; margin-bottom: 4px; }
+.fullpage__sub { color: var(--clr-text-dim); font-size: 14px; margin-bottom: 24px; }
+
+/* Leaderboard table */
+.lb-table { width: 100%; border-collapse: collapse; }
+.lb-table th { text-align: left; color: var(--clr-text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 12px 10px; border-bottom: 1px solid var(--clr-border); }
+.lb-table td { padding: 12px; border-bottom: 1px solid var(--clr-border); font-size: 14px; }
+.lb-table tr:last-child td { border-bottom: none; }
+.lb-rank { font-family: var(--font-display); font-weight: 700; color: var(--clr-accent); }
+.lb-rank--1 { color: var(--clr-warning); }
+.lb-rank--2 { color: #a3a3a3; }
+.lb-rank--3 { color: #cd7f32; }
+
+/* Profile stats grid */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+.stat-card { background: var(--clr-surface2); border: 1px solid var(--clr-border); border-radius: var(--radius); padding: 16px; }
+.stat-card__value { font-family: var(--font-display); font-weight: 800; font-size: 28px; color: var(--clr-accent); }
+.stat-card__label { font-size: 12px; color: var(--clr-text-dim); margin-top: 2px; }
+
+/* XP progress bar */
+.xp-bar { background: var(--clr-surface2); border-radius: 100px; height: 8px; overflow: hidden; margin-top: 8px; }
+.xp-bar__fill { height: 100%; background: linear-gradient(90deg, var(--clr-accent), var(--clr-accent-dim)); border-radius: 100px; transition: width 600ms cubic-bezier(.4,0,.2,1); }
+
+/* Badge grid */
+.badge-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.badge-item {
+  background: var(--clr-surface2); border: 1px solid var(--clr-border);
+  border-radius: var(--radius); padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px;
+  transition: border-color var(--transition);
+}
+.badge-item:hover { border-color: var(--clr-accent); }
+.badge-item--locked { opacity: 0.35; }
+.badge-icon { font-size: 22px; }
+.badge-info__name { font-weight: 600; font-size: 13px; }
+.badge-info__desc { font-size: 11.5px; color: var(--clr-text-dim); margin-top: 2px; }
+
+/* ── Scrollbar ─────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--clr-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--clr-text-dim); }
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .panel { width: 100%; right: -100%; }
+  .navbar__logo span { display: none; }
+  .navbar__btn { padding: 7px 10px; font-size: 12px; }
+  .fullpage { padding: 20px 16px; }
+  .auth-card { margin: 16px; padding: 28px 20px; }
+  .stats-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Location pick mode ────────────────────────────────────────── */
+#map.picking-mode { cursor: crosshair; }
+.picking-banner {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--clr-accent); color: #0a0e1a; border-radius: var(--radius);
+  padding: 10px 20px; font-weight: 600; font-size: 14px; z-index: 20;
+  box-shadow: 0 4px 16px rgba(56,189,248,0.4);
+  display: none; pointer-events: none;
+}
+.picking-banner--visible { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── NAVBAR ──────────────────────────────────────────────────── -->
+<nav class="navbar">
+  <a href="#" class="navbar__logo" onclick="showPage('map')">
+    <svg viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/><path d="M9 14h5v-2h4v2h5v3h-5v2h-4v-2H9v-3z" fill="#38bdf8"/><circle cx="23" cy="23" r="3.5" stroke="#38bdf8" stroke-width="1.5" fill="none"/><path d="M23 20.5v2.5l1.5 1" stroke="#38bdf8" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
+    <span>WhereIsThePlug?</span>
+  </a>
+  <div class="navbar__nav" id="nav-links">
+    <button class="navbar__btn" onclick="showPage('map')" data-nav="map">🗺️ <span data-i18n="nav.map">Map</span></button>
+    <button class="navbar__btn" onclick="openAddPlug()" data-nav="add"><span data-i18n="nav.add_plug">+ Add Plug</span></button>
+    <button class="navbar__btn" onclick="showPage('leaderboard')" data-nav="lb">🏆 <span data-i18n="nav.leaderboard">Leaderboard</span></button>
+    <!-- Auth-dependent buttons injected by JS -->
+    <div id="nav-auth"></div>
+    <select class="navbar__locale" id="locale-switcher" onchange="changeLocale(this.value)">
+      <option value="en">EN</option>
+      <option value="it">IT</option>
+      <option value="es">ES</option>
+      <option value="fr">FR</option>
+    </select>
+  </div>
+</nav>
+
+<!-- ── MAIN ────────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- MAP PAGE -->
+  <div class="page page--active" id="page-map">
+    <div id="map"></div>
+    <div class="map-controls">
+      <button class="map-btn" onclick="locateUser()" id="btn-locate">
+        <span class="map-btn__icon">📍</span> <span data-i18n="map.locate_me">Locate Me</span>
+      </button>
+      <button class="map-btn" onclick="toggleFilters()" id="btn-filters">
+        <span class="map-btn__icon">⚙️</span> <span data-i18n="app.filter">Filters</span>
+      </button>
+    </div>
+    <div class="picking-banner" id="picking-banner" data-i18n="add_plug.pick_location_hint">Click on the map to set location</div>
+  </div>
+
+  <!-- AUTH: LOGIN -->
+  <div class="page" id="page-login">
+    <div class="auth-page">
+      <div class="auth-card">
+        <div class="auth-card__logo">
+          <svg viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/><path d="M9 14h5v-2h4v2h5v3h-5v2h-4v-2H9v-3z" fill="#38bdf8"/><circle cx="23" cy="23" r="3.5" stroke="#38bdf8" stroke-width="1.5" fill="none"/><path d="M23 20.5v2.5l1.5 1" stroke="#38bdf8" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
+        </div>
+        <h2 class="auth-card__title" data-i18n="auth.login_title">Welcome back</h2>
+        <p class="auth-card__sub" data-i18n="auth.login_subtitle">Sign in to continue</p>
+        <div class="form__group">
+          <label class="form__label" data-i18n="auth.email">Email</label>
+          <input type="email" class="form__input" id="login-email" placeholder="you@email.com" />
+        </div>
+        <div class="form__group">
+          <label class="form__label" data-i18n="auth.password">Password</label>
+          <input type="password" class="form__input" id="login-password" placeholder="••••••••" />
+        </div>
+        <div class="form__error" id="login-error"></div>
+        <button class="form__btn" onclick="doLogin()" data-i18n="auth.login_btn">Log In</button>
+        <div style="text-align:center;margin-top:16px;">
+          <button class="form__link" onclick="showPage('register')" data-i18n="auth.no_account">Don't have an account?</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTH: REGISTER -->
+  <div class="page" id="page-register">
+    <div class="auth-page">
+      <div class="auth-card">
+        <div class="auth-card__logo">
+          <svg viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/><path d="M9 14h5v-2h4v2h5v3h-5v2h-4v-2H9v-3z" fill="#38bdf8"/><circle cx="23" cy="23" r="3.5" stroke="#38bdf8" stroke-width="1.5" fill="none"/><path d="M23 20.5v2.5l1.5 1" stroke="#38bdf8" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
+        </div>
+        <h2 class="auth-card__title" data-i18n="auth.register_title">Join the community</h2>
+        <p class="auth-card__sub" data-i18n="auth.register_subtitle">Help others find a plug</p>
+        <div class="form__group">
+          <label class="form__label" data-i18n="auth.display_name">Display Name</label>
+          <input type="text" class="form__input" id="reg-name" placeholder="Explorer" />
+        </div>
+        <div class="form__group">
+          <label class="form__label" data-i18n="auth.email">Email</label>
+          <input type="email" class="form__input" id="reg-email" placeholder="you@email.com" />
+        </div>
+        <div class="form__group">
+          <label class="form__label" data-i18n="auth.password">Password</label>
+          <input type="password" class="form__input" id="reg-password" placeholder="••••••••" />
+        </div>
+        <div class="form__error" id="reg-error"></div>
+        <button class="form__btn" onclick="doRegister()" data-i18n="auth.register_btn">Create Account</button>
+        <div style="text-align:center;margin-top:16px;">
+          <button class="form__link" onclick="showPage('login')" data-i18n="auth.already_account">Already have an account?</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEADERBOARD PAGE -->
+  <div class="page" id="page-leaderboard">
+    <div class="fullpage">
+      <h1 class="fullpage__title" data-i18n="game.leaderboard_title">Leaderboard</h1>
+      <p class="fullpage__sub" data-i18n="game.leaderboard_subtitle">Top contributors</p>
+      <table class="lb-table" id="lb-table">
+        <thead><tr>
+          <th data-i18n="game.rank">#</th>
+          <th>User</th>
+          <th data-i18n="game.level">Level</th>
+          <th>XP</th>
+          <th data-i18n="game.plugs_added">Plugs</th>
+          <th data-i18n="game.badges">Badges</th>
+        </tr></thead>
+        <tbody id="lb-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- PROFILE PAGE -->
+  <div class="page" id="page-profile">
+    <div class="fullpage">
+      <h1 class="fullpage__title" data-i18n="profile.title">My Profile</h1>
+      <div class="stats-grid" id="profile-stats"></div>
+      <div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--clr-text-dim);" data-i18n="game.xp_to_next">XP to next level</span>
+        <span id="profile-xp-label" style="font-size:12px;color:var(--clr-accent);font-weight:600;"></span>
+      </div>
+      <div class="xp-bar"><div class="xp-bar__fill" id="profile-xp-bar" style="width:0%"></div></div>
+      <h3 style="font-family:var(--font-display);font-size:16px;margin:24px 0 12px;" data-i18n="game.badges_title">Your Badges</h3>
+      <div class="badge-grid" id="profile-badges"></div>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL (shared container) -->
+  <div class="panel" id="panel">
+    <div class="panel__header">
+      <span class="panel__title" id="panel-title">Detail</span>
+      <button class="panel__close" onclick="closePanel()">×</button>
+    </div>
+    <div class="panel__body" id="panel-body"></div>
+  </div>
+
+</div><!-- #main -->
+</div><!-- #app -->
+
+<!-- ── Leaflet JS ──────────────────────────────────────────────── -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     APPLICATION JAVASCRIPT — Full SPA engine
+     ══════════════════════════════════════════════════════════════════ -->
+<script>
+/* ══════════════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════════════ */
+const APP = {
+  user: null,              // { id, email, display_name, locale }
+  access_token: null,
+  refresh_token: null,
+  locale: 'en',
+  i18n: {},                // loaded translations
+  map: null,               // Leaflet map instance
+  markers: [],             // current markers on map
+  filters: { wifi: false, free: false, quiet: false, no_purchase: false, category: '' },
+  pickingLocation: false,  // add-plug map pick mode
+  addPlugData: {},         // form state for new plug
+  currentPage: 'map'
+};
+
+const API = '/api';
+
+/* ══════════════════════════════════════════════════════════════════
+   UTILITY
+   ══════════════════════════════════════════════════════════════════ */
+function t(key, fallback = '') {
+  const keys = key.split('.');
+  let val = APP.i18n;
+  for (const k of keys) {
+    if (val == null || typeof val !== 'object') return fallback || key;
+    val = val[k];
+  }
+  return val != null ? val : (fallback || key);
+}
+
+function showError(elId, msg) {
+  const el = document.getElementById(elId);
+  if (el) { el.textContent = msg; el.classList.add('form__error--visible'); }
+}
+function hideError(elId) {
+  const el = document.getElementById(elId);
+  if (el) el.classList.remove('form__error--visible');
+}
+function showSuccess(elId, msg) {
+  const el = document.getElementById(elId);
+  if (el) { el.textContent = msg; el.classList.add('form__success--visible'); }
+}
+
+async function api(method, path, body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (APP.access_token) headers['Authorization'] = `Bearer ${APP.access_token}`;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   i18n ENGINE
+   ══════════════════════════════════════════════════════════════════ */
+async function loadLocale(locale) {
+  const res = await fetch(`/api/i18n/${locale}`);
+  if (res.ok) {
+    APP.i18n = await res.json();
+    APP.locale = locale;
+    document.documentElement.setAttribute('lang', locale);
+    applyTranslations();
+    localStorage.setItem('witpl_locale', locale);
+  }
+}
+
+function applyTranslations() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    const val = t(key);
+    if (val !== key) {
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.placeholder = val;
+      else el.textContent = val;
+    }
+  });
+}
+
+function changeLocale(locale) {
+  loadLocale(locale);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AUTH
+   ══════════════════════════════════════════════════════════════════ */
+function updateNavAuth() {
+  const el = document.getElementById('nav-auth');
+  if (APP.user) {
+    el.innerHTML = `
+      <button class="navbar__btn" onclick="showPage('profile')" data-nav="profile">👤 ${APP.user.display_name}</button>
+      <button class="navbar__btn" onclick="doLogout()"><span data-i18n="nav.logout">Logout</span></button>`;
+  } else {
+    el.innerHTML = `<button class="navbar__btn navbar__btn--accent" onclick="showPage('login')" data-nav="login"><span data-i18n="nav.login">Login</span></button>`;
+  }
+  applyTranslations();
+}
+
+function saveAuth(data) {
+  APP.user = data.user;
+  APP.access_token = data.access_token;
+  APP.refresh_token = data.refresh_token;
+  localStorage.setItem('witpl_access', APP.access_token);
+  localStorage.setItem('witpl_refresh', APP.refresh_token);
+  localStorage.setItem('witpl_user', JSON.stringify(APP.user));
+  updateNavAuth();
+}
+
+function clearAuth() {
+  APP.user = null; APP.access_token = null; APP.refresh_token = null;
+  localStorage.removeItem('witpl_access');
+  localStorage.removeItem('witpl_refresh');
+  localStorage.removeItem('witpl_user');
+  updateNavAuth();
+}
+
+function loadAuthFromStorage() {
+  const user = localStorage.getItem('witpl_user');
+  const access = localStorage.getItem('witpl_access');
+  const refresh = localStorage.getItem('witpl_refresh');
+  if (user && access) {
+    APP.user = JSON.parse(user);
+    APP.access_token = access;
+    APP.refresh_token = refresh;
+  }
+  updateNavAuth();
+}
+
+async function doLogin() {
+  hideError('login-error');
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!email || !password) return showError('login-error', t('auth.error_email_invalid'));
+  const { status, data } = await api('POST', '/auth/login', { email, password });
+  if (status === 200) {
+    saveAuth(data);
+    showPage('map');
+  } else {
+    showError('login-error', t('auth.error_invalid'));
+  }
+}
+
+async function doRegister() {
+  hideError('reg-error');
+  const name = document.getElementById('reg-name').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-password').value;
+  if (!email) return showError('reg-error', t('auth.error_email_invalid'));
+  if (password.length < 8) return showError('reg-error', t('auth.password_min'));
+  const { status, data } = await api('POST', '/auth/register', { email, password, display_name: name || 'Anonymous', locale: APP.locale });
+  if (status === 201) {
+    saveAuth(data);
+    showPage('map');
+  } else if (status === 409) {
+    showError('reg-error', t('auth.error_email_exists'));
+  } else {
+    showError('reg-error', t('app.error_generic'));
+  }
+}
+
+async function doLogout() {
+  if (APP.refresh_token) await api('POST', '/auth/logout', { refresh_token: APP.refresh_token });
+  clearAuth();
+  showPage('map');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PAGE NAVIGATION
+   ══════════════════════════════════════════════════════════════════ */
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('page--active'));
+  const target = document.getElementById(`page-${name}`);
+  if (target) target.classList.add('page--active');
+  APP.currentPage = name;
+  closePanel();
+
+  // Load data for specific pages
+  if (name === 'leaderboard') loadLeaderboard();
+  if (name === 'profile' && APP.user) loadProfile();
+  if (name === 'map') loadPlugsOnMap();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LEAFLET MAP
+   ══════════════════════════════════════════════════════════════════ */
+function initMap() {
+  if (APP.map) return;
+  APP.map = L.map('map', { zoomControl: true }).setView([40.0, 10.0], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19
+  }).addTo(APP.map);
+
+  // Load plugs when map moves
+  APP.map.on('moveend', () => { if (APP.currentPage === 'map') loadPlugsOnMap(); });
+
+  // Click handler for location picking
+  APP.map.on('click', (e) => {
+    if (APP.pickingLocation) {
+      APP.addPlugData.lat = e.latlng.lat;
+      APP.addPlugData.lng = e.latlng.lng;
+      // Show temp marker
+      if (APP._pickMarker) APP.map.removeLayer(APP._pickMarker);
+      APP._pickMarker = L.marker(e.latlng).addTo(APP.map);
+      // Stop picking
+      APP.pickingLocation = false;
+      document.getElementById('map').classList.remove('picking-mode');
+      document.getElementById('picking-banner').classList.remove('picking-banner--visible');
+      // Re-open the add plug panel
+      openAddPlug();
+    }
+  });
+}
+
+function locateUser() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const ll = [pos.coords.latitude, pos.coords.longitude];
+      APP.map.setView(ll, 14);
+      // Add user marker
+      if (APP._userMarker) APP.map.removeLayer(APP._userMarker);
+      APP._userMarker = L.circleMarker(ll, {
+        radius: 8, color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 0.3, weight: 2
+      }).addTo(APP.map);
+    },
+    () => { /* denied */ },
+    { enableHighAccuracy: true }
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PLUGS — LOAD & RENDER
+   ══════════════════════════════════════════════════════════════════ */
+async function loadPlugsOnMap() {
+  if (!APP.map) return;
+  const bounds = APP.map.getBounds();
+  const params = new URLSearchParams({
+    sw_lat: bounds.getSouthWest().lat,
+    sw_lng: bounds.getSouthWest().lng,
+    ne_lat: bounds.getNorthEast().lat,
+    ne_lng: bounds.getNorthEast().lng,
+    limit: '200'
+  });
+
+  // Apply filters
+  if (APP.filters.wifi) params.set('has_wifi', 'true');
+  if (APP.filters.free) params.set('is_free', 'true');
+  if (APP.filters.quiet) params.set('quiet_only', 'true');
+  if (APP.filters.no_purchase) params.set('requires_purchase', 'false');
+  if (APP.filters.category) params.set('category', APP.filters.category);
+
+  const res = await fetch(`${API}/plugs?${params}`);
+  if (!res.ok) return;
+  const data = await res.json();
+
+  // Clear old markers
+  APP.markers.forEach(m => APP.map.removeLayer(m));
+  APP.markers = [];
+
+  // Render
+  (data.plugs || []).forEach(plug => {
+    const icon = getCategoryIcon(plug.category);
+    const divIcon = L.divIcon({
+      html: `<div class="plug-marker ${plug.verified ? 'plug-marker--verified' : ''}">${icon}</div>`,
+      className: '',
+      iconSize: [32, 38],
+      iconAnchor: [16, 38]
+    });
+    const marker = L.marker([plug.lat, plug.lng], { icon: divIcon }).addTo(APP.map);
+    marker.bindPopup(renderPopup(plug), { maxWidth: 260 });
+    marker.on('click', () => marker.openPopup());
+    APP.markers.push(marker);
+  });
+}
+
+function getCategoryIcon(cat) {
+  const icons = {
+    bar:'🍺', library:'📚', university:'🎓', coworking:'💼',
+    station:'🚉', shopping_mall:'🛍️', cafe:'☕', hotel:'🏨',
+    airport:'✈️', hospital:'🏥', other:'🔌'
+  };
+  return icons[cat] || '🔌';
+}
+
+function renderPopup(plug) {
+  const stars = '★'.repeat(Math.round(plug.avg_rating)) + '☆'.repeat(5 - Math.round(plug.avg_rating));
+  return `
+    <div>
+      <div class="popup__name">${plug.name}</div>
+      <div class="popup__badge">${getCategoryIcon(plug.category)} ${t('plug.categories.' + plug.category, plug.category)}</div>
+      <div class="popup__row"><span class="popup__label">${t('plug.outlets')}</span><span class="popup__value">${plug.total_outlets} (${plug.outlet_types.map(o => t('plug.'+o, o)).join(', ')})</span></div>
+      <div class="popup__row"><span class="popup__label">${t('plug.wifi')}</span><span class="popup__value">${plug.has_wifi ? '✅ ' + t('plug.wifi_yes') : '❌ ' + t('plug.wifi_no')}</span></div>
+      <div class="popup__row"><span class="popup__label">${t('plug.noise')}</span><span class="popup__value">${t('plug.noise_' + plug.noise_level, plug.noise_level)}</span></div>
+      <div class="popup__row"><span class="popup__label">${t('plug.rating')}</span><span class="popup__value popup__stars">${stars}</span></div>
+      <div class="popup__row"><span class="popup__label">${plug.is_free ? t('plug.free') : t('plug.paid')}</span><span class="popup__value">${plug.requires_purchase ? '⚠️ ' + t('plug.purchase_required') : '✅'}</span></div>
+      <button class="popup__detail-btn" onclick="openPlugDetail('${plug.id}')">${t('plug.reviews')} & ${t('plug.rating')}</button>
+    </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PLUG DETAIL PANEL
+   ══════════════════════════════════════════════════════════════════ */
+async function openPlugDetail(plugId) {
+  const res = await fetch(`${API}/plugs/${plugId}`);
+  if (!res.ok) return;
+  const plug = await res.json();
+  setPanelTitle(plug.name);
+
+  const noiseClass = `noise-badge--${plug.noise_level}`;
+  let reviewsHtml = '';
+  if (plug.reviews && plug.reviews.length > 0) {
+    reviewsHtml = plug.reviews.map(r => `
+      <div class="review-card">
+        <div class="review-card__header">
+          <span class="review-card__user">${r.user_name || 'Anonymous'}</span>
+          <span class="review-card__stars">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span>
+        </div>
+        ${r.comment ? `<div class="review-card__comment">${r.comment}</div>` : ''}
+        <div class="review-card__date">${new Date(r.created_at).toLocaleDateString()}</div>
+      </div>`).join('');
+  } else {
+    reviewsHtml = `<p style="color:var(--clr-text-dim);font-size:13px;" data-i18n="plug.no_reviews">${t('plug.no_reviews')}</p>`;
+  }
+
+  let reviewFormHtml = '';
+  if (APP.user) {
+    reviewFormHtml = `
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--clr-border);">
+        <h4 style="font-size:14px;margin-bottom:10px;" data-i18n="review.title">${t('review.title')}</h4>
+        <div class="star-input" id="star-input-detail" onclick="setStarRating(event)">
+          <span data-val="1">★</span><span data-val="2">★</span><span data-val="3">★</span><span data-val="4">★</span><span data-val="5">★</span>
+        </div>
+        <textarea class="form__input" id="review-comment" placeholder="${t('review.comment_placeholder')}" style="margin-top:10px;min-height:60px;"></textarea>
+        <div class="form__error" id="review-error"></div>
+        <div class="form__success" id="review-success"></div>
+        <button class="form__btn" onclick="submitReview('${plugId}')" style="margin-top:10px;">${t('review.submit')}</button>
+      </div>`;
+  } else {
+    reviewFormHtml = `<p style="color:var(--clr-text-dim);font-size:13px;margin-top:12px;" data-i18n="review.login_required">${t('review.login_required')}</p>`;
+  }
+
+  document.getElementById('panel-body').innerHTML = `
+    <div class="popup__badge">${getCategoryIcon(plug.category)} ${t('plug.categories.' + plug.category, plug.category)}</div>
+    ${plug.submitted_by ? `<p style="font-size:12px;color:var(--clr-text-dim);margin-bottom:12px;">${t('plug.submitted_by')}: ${plug.submitter_name || 'Unknown'}</p>` : ''}
+    ${plug.description ? `<p style="font-size:13px;color:var(--clr-text-dim);margin-bottom:14px;line-height:1.5;">${plug.description}</p>` : ''}
+
+    <div class="detail-row"><span class="detail-row__label">${t('plug.outlets')}</span><span class="detail-row__value">${plug.total_outlets}</span></div>
+    <div class="detail-row"><span class="detail-row__label">${t('plug.outlet_types')}</span><span class="detail-row__value">${plug.outlet_types.map(o => t('plug.'+o,o)).join(', ')}</span></div>
+    <div class="detail-row"><span class="detail-row__label">${t('plug.wifi')}</span><span class="detail-row__value">${plug.has_wifi ? (plug.wifi_password_required ? '🔒 '+t('plug.wifi_password') : '✅ '+t('plug.wifi_yes')) : '❌ '+t('plug.wifi_no')}</span></div>
+    <div class="detail-row"><span class="detail-row__label">${t('plug.noise')}</span><span class="detail-row__value"><span class="noise-badge ${noiseClass}">${t('plug.noise_'+plug.noise_level)}</span></span></div>
+    <div class="detail-row"><span class="detail-row__label">${t('plug.availability')}</span><span class="detail-row__value">${t('plug.'+plug.availability, plug.availability)}</span></div>
+    <div class="detail-row"><span class="detail-row__label">${plug.is_free ? t('plug.free') : t('plug.paid')}</span><span class="detail-row__value">${plug.requires_purchase ? '⚠️ '+t('plug.purchase_required') : '✅'}</span></div>
+    ${plug.address ? `<div class="detail-row"><span class="detail-row__label">📍</span><span class="detail-row__value" style="font-size:12px;text-align:right;">${plug.address}</span></div>` : ''}
+    <div class="detail-row"><span class="detail-row__label">${t('plug.rating')}</span><span class="detail-row__value popup__stars">${'★'.repeat(Math.round(plug.avg_rating))}${'☆'.repeat(5-Math.round(plug.avg_rating))} <span style="color:var(--clr-text-dim);font-size:12px;">(${plug.total_reviews})</span></span></div>
+
+    <h4 style="font-size:14px;margin:18px 0 10px;" data-i18n="plug.reviews">${t('plug.reviews')}</h4>
+    ${reviewsHtml}
+    ${reviewFormHtml}
+  `;
+  openPanel();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PANEL HELPERS
+   ══════════════════════════════════════════════════════════════════ */
+function openPanel() { document.getElementById('panel').classList.add('panel--open'); }
+function closePanel() { document.getElementById('panel').classList.remove('panel--open'); }
+function setPanelTitle(title) { document.getElementById('panel-title').textContent = title; }
+
+/* ══════════════════════════════════════════════════════════════════
+   REVIEW
+   ══════════════════════════════════════════════════════════════════ */
+let _selectedRating = 0;
+
+function setStarRating(e) {
+  const span = e.target.closest('span[data-val]');
+  if (!span) return;
+  _selectedRating = parseInt(span.dataset.val);
+  const stars = document.querySelectorAll('#star-input-detail span');
+  stars.forEach((s, i) => s.classList.toggle('active', i < _selectedRating));
+}
+
+async function submitReview(plugId) {
+  hideError('review-error');
+  if (_selectedRating < 1) return showError('review-error', t('review.rating_label'));
+  const comment = document.getElementById('review-comment').value.trim();
+  const { status, data } = await api('POST', '/reviews', { plug_id: plugId, rating: _selectedRating, comment });
+  if (status === 201) {
+    showSuccess('review-success', '✅ ' + t('review.submit'));
+    // Refresh detail
+    setTimeout(() => openPlugDetail(plugId), 600);
+  } else if (status === 409) {
+    showError('review-error', t('review.already_reviewed'));
+  } else {
+    showError('review-error', t('app.error_generic'));
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ADD PLUG
+   ══════════════════════════════════════════════════════════════════ */
+function openAddPlug() {
+  if (!APP.user) {
+    showPage('login');
+    return;
+  }
+  setPanelTitle(t('add_plug.title'));
+
+  const outletTypes = ['wall','power_strip','usb','usb_c'];
+  const noiseOptions = ['quiet','moderate','loud','unknown'];
+  const categories = ['bar','library','university','coworking','station','shopping_mall','cafe','hotel','airport','hospital','other'];
+
+  document.getElementById('panel-body').innerHTML = `
+    <p style="font-size:13px;color:var(--clr-text-dim);margin-bottom:16px;" data-i18n="add_plug.subtitle">${t('add_plug.subtitle')}</p>
+
+    <div class="form__group">
+      <label class="form__label" data-i18n="add_plug.name">${t('add_plug.name')}</label>
+      <input type="text" class="form__input" id="ap-name" placeholder="${t('add_plug.name_placeholder')}" value="${APP.addPlugData.name||''}" />
+    </div>
+
+    <div class="form__group">
+      <label class="form__label" data-i18n="add_plug.description">${t('add_plug.description')}</label>
+      <textarea class="form__input" id="ap-desc" placeholder="${t('add_plug.description_placeholder')}" style="min-height:70px;">${APP.addPlugData.description||''}</textarea>
+    </div>
+
+    <div class="form__group">
+      <label class="form__label" data-i18n="add_plug.address">${t('add_plug.address')}</label>
+      <input type="text" class="form__input" id="ap-address" placeholder="${t('add_plug.address_placeholder')}" value="${APP.addPlugData.address||''}" />
+    </div>
+
+    <div class="form__group">
+      <label class="form__label">${t('add_plug.pick_location')}</label>
+      ${APP.addPlugData.lat ? `<p style="font-size:12px;color:var(--clr-success);margin-bottom:6px;">📍 ${APP.addPlugData.lat.toFixed(4)}, ${APP.addPlugData.lng.toFixed(4)}</p>` : ''}
+      <button class="form__btn form__btn--secondary" onclick="startPickLocation()" style="margin:0;padding:9px;">${APP.addPlugData.lat ? '📍 Change Location' : '📍 ' + t('add_plug.pick_location')}</button>
+    </div>
+
+    <div class="form__group">
+      <label class="form__label" data-i18n="add_plug.category">${t('add_plug.category')}</label>
+      <select class="form__input" id="ap-category">
+        ${categories.map(c => `<option value="${c}" ${APP.addPlugData.category===c?'selected':''}>${t('plug.categories.'+c)}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form__group">
+      <label class="form__label" data-i18n="add_plug.total_outlets">${t('add_plug.total_outlets')}</label>
+      <input type="number" class="form__input" id="ap-outlets" min="1" max="500" value="${APP.addPlugData.total_outlets||1}" />
+    </div>
+
+    <div class="form__group">
+      <label class="form__label" data-i18n="add_plug.outlet_types">${t('add_plug.outlet_types')}</label>
+      <div class="chips" id="ap-outlet-types">
+        ${outletTypes.map(ot => `<span class="chip ${(APP.addPlugData.outlet_types||[]).includes(ot)?'chip--active':''}" onclick="toggleChip(this,'${ot}')">${t('plug.'+ot)}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="form__group">
+      <label class="form__label" data-i18n="add_plug.noise_level">${t('add_plug.noise_level')}</label>
+      <select class="form__input" id="ap-noise">
+        ${noiseOptions.map(n => `<option value="${n}" ${APP.addPlugData.noise_level===n?'selected':''}>${t('plug.noise_'+n)}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form__checkbox-row" onclick="toggleCheck('ap-wifi')">
+      <div class="form__checkbox ${APP.addPlugData.has_wifi?'form__checkbox--checked':''}" id="ap-wifi"></div>
+      <span data-i18n="add_plug.has_wifi">${t('add_plug.has_wifi')}</span>
+    </div>
+    <div class="form__checkbox-row" onclick="toggleCheck('ap-wifi-pass')">
+      <div class="form__checkbox ${APP.addPlugData.wifi_password_required?'form__checkbox--checked':''}" id="ap-wifi-pass"></div>
+      <span data-i18n="add_plug.wifi_password_required">${t('add_plug.wifi_password_required')}</span>
+    </div>
+    <div class="form__checkbox-row" onclick="toggleCheck('ap-purchase')">
+      <div class="form__checkbox ${APP.addPlugData.requires_purchase?'form__checkbox--checked':''}" id="ap-purchase"></div>
+      <span data-i18n="add_plug.requires_purchase">${t('add_plug.requires_purchase')}</span>
+    </div>
+    <div class="form__checkbox-row" onclick="toggleCheck('ap-free')">
+      <div class="form__checkbox ${APP.addPlugData.is_free!==false?'form__checkbox--checked':''}" id="ap-free"></div>
+      <span data-i18n="add_plug.is_free">${t('add_plug.is_free')}</span>
+    </div>
+
+    <div class="form__error" id="ap-error"></div>
+    <div class="form__success" id="ap-success"></div>
+    <button class="form__btn" onclick="submitPlug()" style="margin-top:12px;">${t('add_plug.submit_plug')}</button>
+  `;
+  openPanel();
+}
+
+function startPickLocation() {
+  closePanel();
+  showPage('map');
+  APP.pickingLocation = true;
+  document.getElementById('map').classList.add('picking-mode');
+  document.getElementById('picking-banner').classList.add('picking-banner--visible');
+}
+
+function toggleChip(el, val) {
+  el.classList.toggle('chip--active');
+}
+
+function toggleCheck(id) {
+  const el = document.getElementById(id);
+  el.classList.toggle('form__checkbox--checked');
+}
+
+async function submitPlug() {
+  hideError('ap-error');
+  const name = document.getElementById('ap-name').value.trim();
+  if (!name) return showError('ap-error', t('add_plug.name'));
+  if (!APP.addPlugData.lat) return showError('ap-error', t('add_plug.pick_location'));
+
+  // Gather form data
+  const outletChips = document.querySelectorAll('#ap-outlet-types .chip--active');
+  const outlet_types = [...outletChips].map(c => c.textContent.trim().toLowerCase());
+
+  const payload = {
+    name,
+    description: document.getElementById('ap-desc').value.trim(),
+    address: document.getElementById('ap-address').value.trim(),
+    lat: APP.addPlugData.lat,
+    lng: APP.addPlugData.lng,
+    category: document.getElementById('ap-category').value,
+    total_outlets: parseInt(document.getElementById('ap-outlets').value) || 1,
+    outlet_types: outlet_types.length > 0 ? outlet_types : ['wall'],
+    noise_level: document.getElementById('ap-noise').value,
+    has_wifi: document.getElementById('ap-wifi').classList.contains('form__checkbox--checked'),
+    wifi_password_required: document.getElementById('ap-wifi-pass').classList.contains('form__checkbox--checked'),
+    requires_purchase: document.getElementById('ap-purchase').classList.contains('form__checkbox--checked'),
+    is_free: document.getElementById('ap-free').classList.contains('form__checkbox--checked')
+  };
+
+  const { status, data } = await api('POST', '/plugs', payload);
+  if (status === 201) {
+    showSuccess('ap-success', t('add_plug.success'));
+    APP.addPlugData = {};
+    if (APP._pickMarker) { APP.map.removeLayer(APP._pickMarker); APP._pickMarker = null; }
+    setTimeout(() => { closePanel(); loadPlugsOnMap(); }, 1200);
+  } else {
+    showError('ap-error', data.message || t('app.error_generic'));
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FILTERS
+   ══════════════════════════════════════════════════════════════════ */
+function toggleFilters() {
+  setPanelTitle(t('filters.title'));
+  const categories = ['','bar','library','university','coworking','station','shopping_mall','cafe','hotel','airport','hospital','other'];
+
+  document.getElementById('panel-body').innerHTML = `
+    <div class="form__checkbox-row" onclick="toggleFilter('wifi')">
+      <div class="form__checkbox ${APP.filters.wifi?'form__checkbox--checked':''}" id="f-wifi"></div>
+      <span data-i18n="filters.wifi_only">${t('filters.wifi_only')}</span>
+    </div>
+    <div class="form__checkbox-row" onclick="toggleFilter('free')">
+      <div class="form__checkbox ${APP.filters.free?'form__checkbox--checked':''}" id="f-free"></div>
+      <span data-i18n="filters.free_only">${t('filters.free_only')}</span>
+    </div>
+    <div class="form__checkbox-row" onclick="toggleFilter('quiet')">
+      <div class="form__checkbox ${APP.filters.quiet?'form__checkbox--checked':''}" id="f-quiet"></div>
+      <span data-i18n="filters.quiet_only">${t('filters.quiet_only')}</span>
+    </div>
+    <div class="form__checkbox-row" onclick="toggleFilter('no_purchase')">
+      <div class="form__checkbox ${APP.filters.no_purchase?'form__checkbox--checked':''}" id="f-nopurchase"></div>
+      <span data-i18n="filters.no_purchase">${t('filters.no_purchase')}</span>
+    </div>
+
+    <div class="form__group" style="margin-top:16px;">
+      <label class="form__label" data-i18n="filters.category">${t('filters.category')}</label>
+      <select class="form__input" id="f-category" onchange="applyFilters()">
+        ${categories.map(c => `<option value="${c}" ${APP.filters.category===c?'selected':''}>${c===''?'—':t('plug.categories.'+c)}</option>`).join('')}
+      </select>
+    </div>
+
+    <button class="form__btn" onclick="applyFilters()" style="margin-top:12px;">${t('filters.apply')}</button>
+    <button class="form__btn form__btn--secondary" onclick="clearFilters()">${t('app.clear_filters')}</button>
+  `;
+  openPanel();
+}
+
+function toggleFilter(key) {
+  APP.filters[key] = !APP.filters[key];
+  // Update checkbox UI
+  const map = { wifi:'f-wifi', free:'f-free', quiet:'f-quiet', no_purchase:'f-nopurchase' };
+  const el = document.getElementById(map[key]);
+  if (el) el.classList.toggle('form__checkbox--checked');
+}
+
+function applyFilters() {
+  APP.filters.category = document.getElementById('f-category').value;
+  closePanel();
+  loadPlugsOnMap();
+}
+
+function clearFilters() {
+  APP.filters = { wifi: false, free: false, quiet: false, no_purchase: false, category: '' };
+  closePanel();
+  loadPlugsOnMap();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LEADERBOARD
+   ══════════════════════════════════════════════════════════════════ */
+async function loadLeaderboard() {
+  const res = await fetch(`${API}/game/leaderboard`);
+  if (!res.ok) return;
+  const { leaderboard } = await res.json();
+
+  const rankClass = (r) => r <= 3 ? ` lb-rank--${r}` : '';
+  document.getElementById('lb-body').innerHTML = leaderboard.map(u => `
+    <tr>
+      <td><span class="lb-rank${rankClass(u.rank)}">${u.rank}</span></td>
+      <td><strong>${u.display_name}</strong> <span style="font-size:11px;color:var(--clr-text-dim);">${t('game.level_names.'+u.level, 'Lv.'+u.level)}</span></td>
+      <td style="color:var(--clr-accent);font-weight:600;">${u.level}</td>
+      <td style="color:var(--clr-accent);">${u.xp}</td>
+      <td>${u.plugs_added}</td>
+      <td>${u.badges.length}</td>
+    </tr>`).join('');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PROFILE
+   ══════════════════════════════════════════════════════════════════ */
+async function loadProfile() {
+  const res = await fetch(`${API}/game/me`, { headers: { 'Authorization': `Bearer ${APP.access_token}` } });
+  if (!res.ok) return;
+  const stats = await res.json();
+
+  // Also fetch badge catalog
+  const badgeRes = await fetch(`${API}/game/badges`);
+  const { badges: allBadges } = await badgeRes.json();
+
+  const levelName = t('game.level_names.' + stats.level, 'Level ' + stats.level);
+
+  document.getElementById('profile-stats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-card__value">${stats.level}</div>
+      <div class="stat-card__label">${levelName}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:var(--clr-accent);">${stats.xp}</div>
+      <div class="stat-card__label">XP</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:var(--clr-success);">${stats.plugs_added}</div>
+      <div class="stat-card__label">${t('game.plugs_added')}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:var(--clr-warning);">${stats.reviews_posted}</div>
+      <div class="stat-card__label">${t('game.reviews')}</div>
+    </div>`;
+
+  // XP bar
+  const thresholds = [0,100,300,600,1000,1500,2200,3000,4000,5500];
+  const currentThreshold = thresholds[stats.level - 1] || 0;
+  const nextThreshold = thresholds[stats.level] || thresholds[thresholds.length - 1];
+  const pct = Math.min(100, ((stats.xp - currentThreshold) / (nextThreshold - currentThreshold)) * 100);
+  document.getElementById('profile-xp-bar').style.width = pct + '%';
+  document.getElementById('profile-xp-label').textContent = stats.xp_to_next ? `${stats.xp_to_next} ${t('game.xp_to_next')}` : '★ Max Level';
+
+  // Badges
+  const userBadges = new Set(stats.badges);
+  const badgeIcons = { first_plug:'⚡', five_plugs:'🔌', ten_plugs:'🏆', first_review:'⭐', helpful_reviewer:'👍', level_5:'🎖️', level_10:'👑', community_hero:'🌟' };
+
+  document.getElementById('profile-badges').innerHTML = Object.keys(allBadges).map(key => {
+    const locked = !userBadges.has(key);
+    return `<div class="badge-item ${locked?'badge-item--locked':''}">
+      <span class="badge-icon">${badgeIcons[key]||'🏅'}</span>
+      <div class="badge-info">
+        <div class="badge-info__name">${t('game.badge_labels.'+key, key)}</div>
+        <div class="badge-info__desc">${t('game.badge_descriptions.'+key, '')}</div>
+      </div>
+    </div>`
+  }).join('');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════════════ */
+async function init() {
+  // Load locale
+  const savedLocale = localStorage.getItem('witpl_locale') || 'en';
+  document.getElementById('locale-switcher').value = savedLocale;
+  await loadLocale(savedLocale);
+
+  // Load auth state
+  loadAuthFromStorage();
+
+  // Init map
+  initMap();
+  loadPlugsOnMap();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
